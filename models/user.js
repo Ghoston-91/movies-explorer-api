@@ -1,48 +1,54 @@
 const mongoose = require('mongoose');
 const validator = require('validator');
 const bcrypt = require('bcryptjs');
-
-const BadRequestError = require('../middlewares/errors/bad-request-error');
-const UnauthorizedError = require('../middlewares/errors/unauthorized-error');
-const { ERROR_MESSAGE_EMAIL, ERROR_MESSAGE_EMAIL_OR_PASS } = require('../utils/validator-const');
+const AuthError = require('../errors/AuthError');
 
 const userSchema = new mongoose.Schema({
+
   email: {
     type: String,
     required: true,
     unique: true,
     validate: {
-      validator: validator.isEmail,
-      message: ERROR_MESSAGE_EMAIL,
+      validator: (value) => validator.isEmail(value),
+      message: 'Некорретный формат email',
     },
   },
+
   password: {
     type: String,
     required: true,
     select: false,
   },
+
   name: {
     type: String,
     required: true,
     minlength: 2,
     maxlength: 30,
+
   },
+
 });
 
 userSchema.statics.findUserByCredentials = function auth(email, password) {
-  return this.findOne({ email }).select('+password')
+  return this.findOne({
+    email,
+
+  })
+    .select('+password')
     .then((user) => {
       if (!user) {
-        return Promise.reject(new UnauthorizedError(ERROR_MESSAGE_EMAIL_OR_PASS));
+        return Promise.reject(new AuthError('Неправильные почта или пароль'));
       }
-      return bcrypt.compare(password, user.password)
-        .then((matched) => {
-          if (!matched) {
-            return Promise.reject(new BadRequestError(ERROR_MESSAGE_EMAIL_OR_PASS));
-          }
-          return user;
-        });
+
+      return bcrypt.compare(password, user.password).then((matched) => {
+        if (!matched) {
+          return Promise.reject(new AuthError('Неправильные почта или пароль'));
+        }
+
+        return user; // теперь user доступен
+      });
     });
 };
-
 module.exports = mongoose.model('user', userSchema);

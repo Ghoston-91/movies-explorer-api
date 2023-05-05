@@ -1,116 +1,108 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-
+const IncorrectDataError = require('../errors/IncorrectDataError');
+const EmailRepeatError = require('../errors/EmailRepeatError');
 const User = require('../models/user');
-const {
-  SALT_ROUND,
-  SECRET_KEY,
-} = require('../config/config');
 
 const {
-  OK_STATUS, // 200
-  CREATED_STATUS, // 201
-  BAD_REQUEST_ERROR_MESSAGE, // 400
-  NOT_FOUND_ERROR_MESSAGE, // 404
-  CONFLICT_ERROR_MESSAGE, // 409
-  LOGIN_MESSAGE,
-  LOGOUT_MESSAGE,
-} = require('../utils/res-status');
+  NODE_ENV,
+  JWT_SECRET,
+} = process.env;
 
-const BadRequestError = require('../middlewares/errors/bad-request-error');
-const NotFoundError = require('../middlewares/errors/not-found-error');
-const ConflictError = require('../middlewares/errors/conflict-error');
+// Получить пользователя по роуту users/me
 
-// Регистрация
-module.exports.createUser = (req, res, next) => {
+const getUser = (req, res, next) => {
+  const userId = req.user._id;
+  User.findById(userId)
+
+    .then((user) => {
+      res.send(user);
+    })
+    .catch(next);
+};
+
+// Создать пользователя
+
+const createUser = (req, res, next) => {
   const {
     email,
     password,
     name,
   } = req.body;
-
-  bcrypt.hash(password, SALT_ROUND)
+  bcrypt.hash(password, 10)
     .then((hash) => User.create({
       email,
       password: hash,
       name,
     }))
-    .then(() => {
-      res.status(CREATED_STATUS).send({
-        name,
-        email,
-      });
-    })
+    .then((user) => res.send({
+      email: user.email,
+      name: user.name,
+    }))
     .catch((err) => {
       if (err.code === 11000) {
-        next(new ConflictError(CONFLICT_ERROR_MESSAGE));
+        next(new EmailRepeatError('Такой email уже существует'));
+      } else if (err.name === 'ValidationError') {
+        next(new IncorrectDataError('Переданы некорректные данные'));
       } else {
         next(err);
       }
     });
 };
 
-// Авторизация
-module.exports.login = (req, res, next) => {
-  const { email, password } = req.body;
-  const { NODE_ENV, JWT_SECRET } = process.env;
+// Обновить информацию о пользователе
 
-  User.findUserByCredentials(email, password)
+const updateUserInfo = (req, res, next) => {
+  const userId = req.user._id;
+  const {
+    email,
+    name,
+  } = req.body;
+
+  User.findByIdAndUpdate(userId, {
+    email,
+    name,
+  }, {
+    new: true,
+    runValidators: true,
+  })
     .then((user) => {
-      const token = jwt.sign(
-        { _id: user._id },
-        NODE_ENV === 'production' ? JWT_SECRET : SECRET_KEY,
-        { expiresIn: '7d' },
-      );
+      res.send(user);
+    })
+    .catch((err) => {
+      if (err.name === 'ValidationError') {
+        next(new IncorrectDataError('Переданы некорректные данные'));
+      } else if (err.code === 11000) {
+        next(new EmailRepeatError('Такой email уже существует'));
+      } else {
+        next(err);
+      }
+    });
+};
 
-      res.cookie('jwt', token, {
-        maxAge: 3600000 * 24 * 7,
-        httpOnly: true,
-        sameSite: false,
+const login = (req, res, next) => {
+  const {
+    email,
+    password,
+  } = req.body;
+
+  return User.findUserByCredentials(email, password)
+    .then((user) => {
+      // создадим токен
+      const token = jwt.sign({
+        _id: user._id,
+      }, NODE_ENV === 'production' ? JWT_SECRET : 'some-secret-key-dev', {
+        expiresIn: '7d',
       });
 
-      res.status(OK_STATUS).send({ message: LOGIN_MESSAGE });
+      // вернём токен
+      res.send({
+        token,
+      });
     })
     .catch(next);
 };
 
-// Выход с сайта
-module.exports.logout = (req, res) => {
-  res.clearCookie('jwt').send({ message: LOGOUT_MESSAGE });
-};
-
-module.exports.getUserInfo = (req, res, next) => {
-  User.findById(req.user._id)
-    .orFail(() => {
-      throw new NotFoundError(NOT_FOUND_ERROR_MESSAGE);
-    })
-    .then((user) => res.status(OK_STATUS).send({ email: user.email, name: user.name }))
-    .catch(next);
-};
-
-module.exports.updateUserInfo = (req, res, next) => {
-  const { email, name } = req.body;
-
-  User.findByIdAndUpdate(
-    req.user._id,
-    { email, name },
-    {
-      new: true,
-      runValidators: true,
-      upsert: false,
-    },
-  )
-    .orFail(() => {
-      throw new NotFoundError(NOT_FOUND_ERROR_MESSAGE);
-    })
-    .then((user) => res.status(OK_STATUS).send({ email: user.email, name: user.name }))
-    .catch((err) => {
-      if (err.name === 'CastError') {
-        next(new BadRequestError(BAD_REQUEST_ERROR_MESSAGE));
-      } else if (err.code === 11000) {
-        next(new ConflictError(CONFLICT_ERROR_MESSAGE));
-      } else {
-        next(err);
-      }
-    });
+module.exports = {
+  getUser, updateUserInfo, createUser, login,
 };

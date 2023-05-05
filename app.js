@@ -1,45 +1,37 @@
 require('dotenv').config();
 const express = require('express');
-const helmet = require('helmet');
 const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
-const cookieParser = require('cookie-parser');
-const cors = require('cors');
+const helmet = require('helmet');
 const { errors } = require('celebrate');
-
-const { CORS_OPTIONS, MONGO_BASE } = require('./config/config');
-const { handleErrors } = require('./middlewares/errors-handler');
 const { requestLogger, errorLogger } = require('./middlewares/logger');
-const limiter = require('./middlewares/rate-limiter');
+const { limiter } = require('./middlewares/limiter');
 const routes = require('./routes');
+const cors = require('./middlewares/cors');
+const errorsHandler = require('./middlewares/errors');
 
-const { NODE_ENV, PROD_MONGO_BASE } = process.env;
-
-// Слушаем 3000 порт
 const { PORT = 3000 } = process.env;
 
 const app = express();
-app.use(helmet());
 
-app.use('*', cors(CORS_OPTIONS));
-
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(cookieParser());
-
-mongoose.connect(
-  NODE_ENV === 'production' ? PROD_MONGO_BASE : MONGO_BASE,
-  { useNewUrlParser: true },
-);
+mongoose.connect('mongodb://127.0.0.1:27017/bitfilmsdb', {
+})
+  .then(() => {
+    console.log('Connected');
+  })
+  .catch((error) => {
+    console.log(`Error during connection ${error}`);
+  });
 
 app.use(requestLogger);
+app.use(bodyParser.json());
 app.use(limiter);
-app.use('/', routes);
+app.use(helmet());
+app.use(cors);
+app.use(routes);
 app.use(errorLogger);
-
 app.use(errors());
-app.use(handleErrors);
-
-app.listen(PORT, () => {
-  console.log(`Listening on port ${PORT}`);
+app.use(errorsHandler);
+app.listen(3000, () => {
+  console.log(`Listing on port ${PORT}`);
 });
